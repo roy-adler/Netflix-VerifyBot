@@ -79,7 +79,7 @@ async def click_confirmation_link(url):
         response = await page.goto(url)
         await browser.close()
         if response and response.status == 200:
-            logger.info("✅ Confirmation link clicked successfully!")
+            log_and_broadcast("✅ Confirmation link clicked successfully!")
         else:
             logger.warning(f"⚠️ Loading error. Status: {response.status if response else 'No response'}")
             return False
@@ -177,11 +177,19 @@ async def main():
                         await check_emails(mailbox)
                         logger.debug(f"💤 Waiting {CHECK_INTERVAL} seconds before next check...")
                         await asyncio.sleep(CHECK_INTERVAL)
-                        retry_count = 0  # Reset retry count on successful connection
+                        retry_count = 0  # Reset retry count on successful operation
                     except Exception as e:
-                        log_and_broadcast(f"❌ Connection error: {e}", "ERROR")
-                        log_and_broadcast("🔄 Reconnecting...")
-                        break  # Break inner loop to reconnect
+                        retry_count += 1
+                        log_and_broadcast(f"❌ Error in check_emails (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}", "ERROR")
+                        
+                        if retry_count >= MAX_RETRY_ATTEMPTS:
+                            log_and_broadcast(f"💀 Maximum retry attempts ({MAX_RETRY_ATTEMPTS}) reached. Shutting down gracefully.", "ERROR")
+                            log_and_broadcast("🛑 Netflix VerifyBot is stopping to prevent infinite loops and spam.", "ERROR")
+                            import sys
+                            sys.exit(0)  # Exit with code 0 for graceful shutdown
+                        else:
+                            log_and_broadcast("🔄 Reconnecting...")
+                            break  # Break inner loop to reconnect
                         
         except Exception as e:
             retry_count += 1
@@ -190,7 +198,8 @@ async def main():
             if retry_count >= MAX_RETRY_ATTEMPTS:
                 log_and_broadcast(f"💀 Maximum retry attempts ({MAX_RETRY_ATTEMPTS}) reached. Shutting down gracefully.", "ERROR")
                 log_and_broadcast("🛑 Netflix VerifyBot is stopping to prevent infinite loops and spam.", "ERROR")
-                break
+                import sys
+                sys.exit(0)  # Exit with code 0 for graceful shutdown
             else:
                 log_and_broadcast(f"🔄 Retrying in {CHECK_INTERVAL} seconds...")
                 await asyncio.sleep(CHECK_INTERVAL)
