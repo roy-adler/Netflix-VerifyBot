@@ -22,6 +22,7 @@ TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL", "http://localhost:5000/api/broa
 TELEGRAM_CHANNEL = os.getenv("TELEGRAM_CHANNEL", "roy") 
 CHECK_INTERVAL = 2  # seconds
 MINUTES_TO_WAIT = 900 # 900 seconds = 15 minutes
+MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
 
 # Configure logging
@@ -161,7 +162,10 @@ async def main():
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
     log_and_broadcast(f"📝 Logging to: {LOG_PATH}")
-    while True:
+    
+    retry_count = 0
+    
+    while retry_count < MAX_RETRY_ATTEMPTS:
         try:
             # Establish connection once
             with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD) as mailbox:
@@ -173,14 +177,24 @@ async def main():
                         await check_emails(mailbox)
                         logger.debug(f"💤 Waiting {CHECK_INTERVAL} seconds before next check...")
                         await asyncio.sleep(CHECK_INTERVAL)
+                        retry_count = 0  # Reset retry count on successful connection
                     except Exception as e:
                         log_and_broadcast(f"❌ Connection error: {e}", "ERROR")
                         log_and_broadcast("🔄 Reconnecting...")
                         break  # Break inner loop to reconnect
                         
         except Exception as e:
-            log_and_broadcast(f"❌ Failed to connect: {e}", "ERROR")
-            log_and_broadcast(f"🔄 Retrying in {CHECK_INTERVAL} seconds...")
-            await asyncio.sleep(CHECK_INTERVAL)
+            retry_count += 1
+            log_and_broadcast(f"❌ Failed to connect (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}", "ERROR")
+            
+            if retry_count >= MAX_RETRY_ATTEMPTS:
+                log_and_broadcast(f"💀 Maximum retry attempts ({MAX_RETRY_ATTEMPTS}) reached. Shutting down gracefully.", "ERROR")
+                log_and_broadcast("🛑 Netflix VerifyBot is stopping to prevent infinite loops and spam.", "ERROR")
+                break
+            else:
+                log_and_broadcast(f"🔄 Retrying in {CHECK_INTERVAL} seconds...")
+                await asyncio.sleep(CHECK_INTERVAL)
+    
+    log_and_broadcast("👋 Netflix VerifyBot has stopped.", "INFO")
 
 asyncio.run(main())
