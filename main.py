@@ -161,7 +161,7 @@ async def main():
     print("🚀 Starting main function")
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
-    log_and_broadcast(f"📝 Logging to: {LOG_PATH}")
+    log_and_broadcast(f"📝 Logging to {LOG_PATH} and broadcasting to {TELEGRAM_CHANNEL}")
     
     retry_count = 0
     
