@@ -22,7 +22,7 @@ TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY", "asdfghjkl")
 TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL", "http://localhost:5000/api/broadcast-to-channel")
 TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME", "roy")
 TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET", "a55ed20e2")
-CHECK_INTERVAL = 5  # seconds
+CHECK_INTERVAL = 20  # seconds
 MINUTES_TO_WAIT = 900 # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
@@ -75,8 +75,16 @@ async def click_verification_code_link(url):
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto(url)
-        await page.wait_for_selector('[data-uia="set-primary-location-action"]', timeout=5000)
-
+        await page.wait_for_selector('[data-uia="travel-verification-otp"]', timeout=5000)
+        verification_code = await page.inner_text('[data-uia="travel-verification-otp"]', timeout=5000)
+        await browser.close()
+        if verification_code:
+            log_and_broadcast(f"🔢 Verification code: {verification_code}")
+            return verification_code
+        else:
+            log_and_broadcast(f"❌ No verification code found")
+            return False
+        
 async def click_confirmation_link(url):
     logger.info(f"🌍 Opening link: {url}")
     async with async_playwright() as p:
@@ -84,7 +92,6 @@ async def click_confirmation_link(url):
         page = await browser.new_page()
         await page.goto(url)
         await page.wait_for_selector('[data-uia="set-primary-location-action"]', timeout=5000)
-        await page.click('[data-uia="set-primary-location-action"]')
         
         # Wait for a confirmation message or page change to verify success
         response = await page.goto(url)
@@ -107,13 +114,14 @@ async def check_emails(mailbox):
                 html = msg.html or msg.text
                 
                 # Check if email is older than 15 minutes AND has been read
-                # if msg.date:
-                #     time_diff = current_time - msg.date
-                #     if time_diff.total_seconds() > MINUTES_TO_WAIT and msg.flags and '\\Seen' in msg.flags:
-                #         mailbox.move(msg.uid, GELESEN_FOLDER)
-                #         log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen (older than 15 minutes AND read)")
-                #         log_email_moved(msg, "Email older than 15 minutes AND read")
-                #         continue  # Skip further processing for this email
+                if msg.date:
+                    time_diff = current_time - msg.date
+                    if time_diff.total_seconds() > MINUTES_TO_WAIT and msg.flags and '\\Seen' in msg.flags:
+                        mailbox.move(msg.uid, GELESEN_FOLDER)
+                        log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen (older than 15 minutes AND read)")
+                        log_email_moved(msg, "Email older than 15 minutes AND read")
+                        continue  # Skip further processing for this email
+                    
                 if "accountaccess" in html:
                     start = html.find("https://www.netflix.com/accountaccess")
                     end = html.find('"', start)
@@ -140,11 +148,14 @@ async def check_emails(mailbox):
                     log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
 
                     # Extract verification code from HTML
-                    verification_code = await click_verification_code_link(html)
-                    if verification_code:
-                        log_and_broadcast(f"🔢 Verification code: {verification_code}")
-                    
-                    
+                    verification_code_successful = await click_verification_code_link(url)
+                    if verification_code_successful:
+                        mailbox.move(msg.uid, GELESEN_FOLDER)
+                        log_and_broadcast("📦 Email moved to Gelesen folder")
+                        log_email_moved(msg, "Netflix verification code link clicked")
+                    else:
+                        log_and_broadcast(f"❌ No verification code found")
+                      
                 if "update-primary-location" in html:
                     start = html.find("https://www.netflix.com/account/update-primary-location")
                     end = html.find('"', start)
@@ -160,7 +171,6 @@ async def check_emails(mailbox):
                         log_email_moved(msg, "Netflix update link clicked")
                     else:
                         log_and_broadcast("❌ Failed to click confirmation link, email not moved", "WARNING")
-                        log_email_moved(msg, "Failed to click Netflix update link", success=False)
             except Exception as msg_error:
                 # Log individual email processing errors but don't break the entire check
                 logger.warning(f"⚠️ Error processing email '{msg.subject if hasattr(msg, 'subject') else 'Unknown'}': {msg_error}")
