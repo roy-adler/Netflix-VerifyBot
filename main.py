@@ -8,6 +8,7 @@ import time
 import logging
 from datetime import datetime, timezone
 import requests
+import re
 
 load_dotenv("config.env")
 
@@ -19,11 +20,13 @@ IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
 LOG_PATH = os.getenv("LOG_PATH", "netflix-validator.log")
 TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY", "asdfghjkl")
 TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL", "http://localhost:5000/api/broadcast-to-channel")
-TELEGRAM_CHANNEL = os.getenv("TELEGRAM_CHANNEL", "roy") 
-CHECK_INTERVAL = 2  # seconds
+TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME", "roy")
+TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET", "a55ed20e2")
+CHECK_INTERVAL = 5  # seconds
 MINUTES_TO_WAIT = 900 # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
+retry_count = 0
 
 # Configure logging
 log_dir = os.path.dirname(LOG_PATH)
@@ -66,6 +69,14 @@ def log_email_moved(msg, reason, success=True):
     except Exception as e:
         logger.error(f"Error logging email details: {e}")
 
+async def click_verification_code_link(url):
+    logger.info(f"🌍 Opening link: {url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto(url)
+        await page.wait_for_selector('[data-uia="set-primary-location-action"]', timeout=5000)
+
 async def click_confirmation_link(url):
     logger.info(f"🌍 Opening link: {url}")
     async with async_playwright() as p:
@@ -92,36 +103,77 @@ async def check_emails(mailbox):
         current_time = datetime.now(timezone.utc)
         
         for msg in mailbox.fetch(reverse=True):
-            html = msg.html or msg.text
-            
-            # Check if email is older than 15 minutes AND has been read
-            if msg.date:
-                time_diff = current_time - msg.date
-                if time_diff.total_seconds() > MINUTES_TO_WAIT and msg.flags and '\\Seen' in msg.flags:
-                    mailbox.move(msg.uid, GELESEN_FOLDER)
-                    log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen (older than 15 minutes AND read)")
-                    log_email_moved(msg, "Email older than 15 minutes AND read")
-                    continue  # Skip further processing for this email
-            
-            if "update-primary-location" in html:
-                start = html.find("https://www.netflix.com/account/update-primary-location")
-                end = html.find('"', start)
-                url = html[start:end]
-                log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
-
-                confirmation_successful = await click_confirmation_link(url)
+            try:
+                html = msg.html or msg.text
                 
-                if confirmation_successful:
+                # Check if email is older than 15 minutes AND has been read
+                # if msg.date:
+                #     time_diff = current_time - msg.date
+                #     if time_diff.total_seconds() > MINUTES_TO_WAIT and msg.flags and '\\Seen' in msg.flags:
+                #         mailbox.move(msg.uid, GELESEN_FOLDER)
+                #         log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen (older than 15 minutes AND read)")
+                #         log_email_moved(msg, "Email older than 15 minutes AND read")
+                #         continue  # Skip further processing for this email
+                if "accountaccess" in html:
+                    start = html.find("https://www.netflix.com/accountaccess")
+                    end = html.find('"', start)
+                    url = html[start:end]
+                    
+                    log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
+                    
+                    # Extract verification code from HTML using Regex - look anywhere in HTML for 4-digit number
+                    match = re.search(r'<td[^>]*>\s*(\d{4})\s*</td>', html)
+                    if match:
+                        verification_code = match.group(1)
+                        log_and_broadcast(f"🔢 Verification code: {verification_code}")
+                    else:
+                        log_and_broadcast(f"❌ No verification code found")
+                    
+                    log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen")
                     mailbox.move(msg.uid, GELESEN_FOLDER)
-                    log_and_broadcast("📦 Email moved to Gelesen folder")
-                    log_email_moved(msg, "Netflix update link clicked")
-                else:
-                    log_and_broadcast("❌ Failed to click confirmation link, email not moved", "WARNING")
-                    log_email_moved(msg, "Failed to click Netflix update link", success=False)
+
+                if "travel/verify" in html:
+                    start = html.find("https://www.netflix.com/account/travel/verify")
+                    end = html.find('"', start)
+                    url = html[start:end]
+                
+                    log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
+
+                    # Extract verification code from HTML
+                    verification_code = await click_verification_code_link(html)
+                    if verification_code:
+                        log_and_broadcast(f"🔢 Verification code: {verification_code}")
+                    
+                    
+                if "update-primary-location" in html:
+                    start = html.find("https://www.netflix.com/account/update-primary-location")
+                    end = html.find('"', start)
+                    url = html[start:end]
+                    
+                    log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
+
+                    confirmation_successful = await click_confirmation_link(url)
+                    
+                    if confirmation_successful:
+                        mailbox.move(msg.uid, GELESEN_FOLDER)
+                        log_and_broadcast("📦 Email moved to Gelesen folder")
+                        log_email_moved(msg, "Netflix update link clicked")
+                    else:
+                        log_and_broadcast("❌ Failed to click confirmation link, email not moved", "WARNING")
+                        log_email_moved(msg, "Failed to click Netflix update link", success=False)
+            except Exception as msg_error:
+                # Log individual email processing errors but don't break the entire check
+                logger.warning(f"⚠️ Error processing email '{msg.subject if hasattr(msg, 'subject') else 'Unknown'}': {msg_error}")
+                continue
+                
     except Exception as e:
         logger.error(f"❌ Error checking emails: {e}")
-        # Re-raise to trigger reconnection
-        raise
+        # Only re-raise critical errors that require reconnection
+        if "connection" in str(e).lower() or "timeout" in str(e).lower() or "ssl" in str(e).lower():
+            raise
+        else:
+            # For other errors, just log and continue
+            logger.warning(f"⚠️ Non-critical error, continuing: {e}")
 
 def broadcast_to_channel(message):
     headers = {
@@ -130,7 +182,9 @@ def broadcast_to_channel(message):
     }
     
     body = {
-        "message": message
+        "message": message,
+        "channel_name": TELEGRAM_CHANNEL_NAME,
+        "channel_secret": TELEGRAM_CHANNEL_SECRET
     }
     
     try:
@@ -156,40 +210,35 @@ def log_and_broadcast(message, level="INFO"):
     if level in ["INFO", "ERROR", "WARNING"]:
         broadcast_to_channel(message)
 
+async def establish_connection_and_check_emails():
+    with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD) as mailbox:
+        log_and_broadcast(f"✅ Connected to mailbox successfully")
+        while True:
+            try:
+                await check_emails(mailbox)
+                logger.debug(f"💤 Waiting {CHECK_INTERVAL} seconds before next check...")
+                await asyncio.sleep(CHECK_INTERVAL)
+            except Exception as e:
+                log_and_broadcast(f"❌ Error in check_emails: {e}", "ERROR")
+                log_and_broadcast("🔄 Reconnecting...")
+                # Add delay before reconnecting to prevent rapid reconnection loop
+                await asyncio.sleep(CHECK_INTERVAL)
+                break  # Break inner loop to reconnect
 
 async def main():
+    retry_count = 0
+
     print("🚀 Starting main function")
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
-    log_and_broadcast(f"📝 Logging to {LOG_PATH} and broadcasting to {TELEGRAM_CHANNEL}")
+    log_and_broadcast(f"📝 Logging to {LOG_PATH} and broadcasting to channel {TELEGRAM_CHANNEL_NAME}")
     
-    retry_count = 0
-    
+
     while retry_count < MAX_RETRY_ATTEMPTS:
         try:
-            # Establish connection once
-            with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD) as mailbox:
-                log_and_broadcast(f"✅ Connected to mailbox successfully")
-                
-                # Keep connection alive and check emails periodically
-                while True:
-                    try:
-                        await check_emails(mailbox)
-                        logger.debug(f"💤 Waiting {CHECK_INTERVAL} seconds before next check...")
-                        await asyncio.sleep(CHECK_INTERVAL)
-                        retry_count = 0  # Reset retry count on successful operation
-                    except Exception as e:
-                        retry_count += 1
-                        log_and_broadcast(f"❌ Error in check_emails (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}", "ERROR")
-                        
-                        if retry_count >= MAX_RETRY_ATTEMPTS:
-                            log_and_broadcast(f"💀 Maximum retry attempts ({MAX_RETRY_ATTEMPTS}) reached. Shutting down gracefully.", "ERROR")
-                            log_and_broadcast("🛑 Netflix VerifyBot is stopping to prevent infinite loops and spam.", "ERROR")
-                            import sys
-                            sys.exit(0)  # Exit with code 0 for graceful shutdown
-                        else:
-                            log_and_broadcast("🔄 Reconnecting...")
-                            break  # Break inner loop to reconnect
+            await establish_connection_and_check_emails()
+            # If we reach here, connection was successful, reset retry count
+            retry_count = 0
                         
         except Exception as e:
             retry_count += 1
@@ -201,9 +250,11 @@ async def main():
                 import sys
                 sys.exit(0)  # Exit with code 0 for graceful shutdown
             else:
-                log_and_broadcast(f"🔄 Retrying in {CHECK_INTERVAL} seconds...")
-                await asyncio.sleep(CHECK_INTERVAL)
+                # Use exponential backoff: wait longer between retries
+                wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))  # 5, 10, 20 seconds
+                log_and_broadcast(f"🔄 Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
     
-    log_and_broadcast("👋 Netflix VerifyBot has stopped.", "INFO")
+    log_and_broadcast("👋 Netflix VerifyBot has stopped (retry count: {retry_count}).", "INFO")
 
 asyncio.run(main())
