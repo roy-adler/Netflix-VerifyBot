@@ -22,7 +22,7 @@ TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY", "asdfghjkl")
 TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL", "http://localhost:5000/api/broadcast-to-channel")
 TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME", "roy")
 TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET", "a55ed20e2")
-CHECK_INTERVAL = 20  # seconds
+CHECK_INTERVAL = 3  # seconds
 MINUTES_TO_WAIT = 900 # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
