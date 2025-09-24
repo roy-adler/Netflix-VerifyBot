@@ -10,40 +10,51 @@ from datetime import datetime, timezone
 import requests
 import re
 
-load_dotenv("config.env")
-
+# Global constants
 GELESEN_FOLDER = "Gelesen"
-EMAIL = os.getenv("EMAIL")
-PASSWORD = os.getenv("PASSWORD")
-IMAP_SERVER = os.getenv("IMAP_SERVER")
-IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-LOG_PATH = os.getenv("LOG_PATH", "netflix-validator.log")
-TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY", "asdfghjkl")
-TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL", "http://localhost:5000/api/broadcast-to-channel")
-TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME", "roy")
-TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET", "a55ed20e2")
 CHECK_INTERVAL = 3  # seconds
-MINUTES_TO_WAIT = 900 # 900 seconds = 15 minutes
+MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
-retry_count = 0
+def setup_application():
+    """Initialize application configuration and logging"""
+    # Load environment variables
+    load_dotenv("config.env")
+    
+    # Environment-dependent configuration variables
+    global EMAIL, PASSWORD, IMAP_SERVER, IMAP_PORT, LOG_PATH
+    global TELEGRAM_API_KEY, TELEGRAM_API_URL, TELEGRAM_CHANNEL_NAME, TELEGRAM_CHANNEL_SECRET
+    global SSL_CONTEXT, logger, retry_count
+    
+    EMAIL = os.getenv("EMAIL")
+    PASSWORD = os.getenv("PASSWORD")
+    IMAP_SERVER = os.getenv("IMAP_SERVER")
+    IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+    LOG_PATH = os.getenv("LOG_PATH", "netflix-validator.log")
+    TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY")
+    TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL")
+    TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME")
+    TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET")
+    retry_count = 0
 
-# Configure logging
-log_dir = os.path.dirname(LOG_PATH)
-if log_dir and not os.path.exists(log_dir):
-    os.makedirs(log_dir, exist_ok=True)
+    # Configure logging
+    log_dir = os.path.dirname(LOG_PATH)
+    if log_dir and not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_PATH),
-        logging.StreamHandler()  # Also log to console
-    ]
-)
-logger = logging.getLogger(__name__)
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(LOG_PATH),
+            logging.StreamHandler()  # Also log to console
+        ]
+    )
+    logger = logging.getLogger(__name__)
 
-SSL_CONTEXT = ssl.create_default_context()
+    SSL_CONTEXT = ssl.create_default_context()
+    
+    return logger
 
 def log_email_moved(msg, reason, success=True):
     """Log details about an email being moved to gelesen folder"""
@@ -236,8 +247,9 @@ async def establish_connection_and_check_emails():
                 break  # Break inner loop to reconnect
 
 async def main():
-    retry_count = 0
-
+    # Initialize application configuration and logging
+    logger = setup_application()
+    
     print("🚀 Starting main function")
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
