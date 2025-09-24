@@ -16,6 +16,9 @@ CHECK_INTERVAL = 3  # seconds
 MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 
+# Global variables (set during setup)
+TELEGRAM_ENABLED = False
+
 def setup_application():
     """Initialize application configuration and logging"""
     # Load environment variables
@@ -36,7 +39,7 @@ def setup_application():
     TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME")
     TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET")
     retry_count = 0
-
+    
     # Configure logging
     log_dir = os.path.dirname(LOG_PATH)
     if log_dir and not os.path.exists(log_dir):
@@ -52,9 +55,98 @@ def setup_application():
     )
     logger = logging.getLogger(__name__)
 
+    # Test logging functionality
+    test_logging_functionality(logger)
+
+    # Test Telegram connection and disable if it fails
+    global TELEGRAM_ENABLED
+    TELEGRAM_ENABLED = test_telegram_connection()
+
     SSL_CONTEXT = ssl.create_default_context()
     
     return logger
+
+def test_logging_functionality(logger):
+    """Test logging functionality for both file and console output"""
+    print("🧪 Testing logging functionality...")
+    
+    # Test different log levels
+    test_messages = [
+        ("INFO", "📝 Logging test - INFO level message"),
+        ("WARNING", "⚠️ Logging test - WARNING level message"),
+        ("ERROR", "❌ Logging test - ERROR level message"),
+        ("DEBUG", "🔍 Logging test - DEBUG level message")
+    ]
+    
+    for level, message in test_messages:
+        if level == "INFO":
+            logger.info(message)
+        elif level == "WARNING":
+            logger.warning(message)
+        elif level == "ERROR":
+            logger.error(message)
+        elif level == "DEBUG":
+            logger.debug(message)
+    
+    # Test file logging by checking if log file exists and has content
+    try:
+        if os.path.exists(LOG_PATH):
+            with open(LOG_PATH, 'r', encoding='utf-8') as f:
+                log_content = f.read()
+                if "Logging test" in log_content:
+                    print("✅ File logging test successful")
+                else:
+                    print("❌ File logging test failed - no test messages found in log file")
+        else:
+            print(f"❌ Log file not found at {LOG_PATH}")
+    except Exception as e:
+        print(f"❌ Error testing file logging: {e}")
+    
+    # Test log_and_broadcast function
+    print("🧪 Testing log_and_broadcast function...")
+    log_and_broadcast("🔧 Logging test - log_and_broadcast function test", "INFO")
+    
+    # Test email logging function with a mock email object
+    print("🧪 Testing email logging function...")
+    class MockEmail:
+        def __init__(self):
+            self.subject = "Test Email Subject"
+            self.from_ = "test@example.com"
+            self.date = datetime.now()
+    
+    mock_email = MockEmail()
+    log_email_moved(mock_email, "Logging test - email moved")
+    
+    print("✅ Logging functionality test completed")
+
+def test_telegram_connection():
+    """Test Telegram connection and return True if successful, False otherwise"""
+    if not all([TELEGRAM_API_KEY, TELEGRAM_API_URL, TELEGRAM_CHANNEL_NAME, TELEGRAM_CHANNEL_SECRET]):
+        print("⚠️ Telegram configuration incomplete - notifications disabled")
+        return False
+    
+    headers = {
+        "X-API-Key": TELEGRAM_API_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    body = {
+        "message": "🔧 Netflix Autovalidator - Telegram connection test",
+        "channel_name": TELEGRAM_CHANNEL_NAME,
+        "channel_secret": TELEGRAM_CHANNEL_SECRET
+    }
+    
+    try:
+        response = requests.post(TELEGRAM_API_URL, headers=headers, json=body, timeout=10)
+        if response.status_code == 200:
+            print("✅ Telegram connection successful - notifications enabled")
+            return True
+        else:
+            print(f"❌ Telegram connection failed (Status: {response.status_code}) - notifications disabled")
+            return False
+    except Exception as e:
+        print(f"❌ Telegram connection error: {e} - notifications disabled")
+        return False
 
 def log_email_moved(msg, reason, success=True):
     """Log details about an email being moved to gelesen folder"""
@@ -197,6 +289,10 @@ async def check_emails(mailbox):
             logger.warning(f"⚠️ Non-critical error, continuing: {e}")
 
 def broadcast_to_channel(message):
+    """Send message to Telegram channel if enabled"""
+    if not TELEGRAM_ENABLED:
+        return None
+        
     headers = {
         "X-API-Key": TELEGRAM_API_KEY,
         "Content-Type": "application/json"
@@ -209,10 +305,10 @@ def broadcast_to_channel(message):
     }
     
     try:
-        response = requests.post(TELEGRAM_API_URL, headers=headers, json=body)
+        response = requests.post(TELEGRAM_API_URL, headers=headers, json=body, timeout=10)
         return response.json() if response.status_code == 200 else None
     except Exception as e:
-        logger.error(f"❌ API Error: {e}")
+        logger.error(f"❌ Telegram API Error: {e}")
         return None
 
 def log_and_broadcast(message, level="INFO"):
@@ -253,7 +349,10 @@ async def main():
     print("🚀 Starting main function")
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
-    log_and_broadcast(f"📝 Logging to {LOG_PATH} and broadcasting to channel {TELEGRAM_CHANNEL_NAME}")
+    
+    # Show Telegram status
+    telegram_status = "enabled" if TELEGRAM_ENABLED else "disabled"
+    log_and_broadcast(f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status}")
     
 
     while retry_count < MAX_RETRY_ATTEMPTS:
