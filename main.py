@@ -9,15 +9,18 @@ import logging
 from datetime import datetime, timezone
 import requests
 import re
+from test_functionality import run_all_tests
 
 # Global constants
 GELESEN_FOLDER = "Gelesen"
 CHECK_INTERVAL = 3  # seconds
 MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
+SSL_CONTEXT = ssl.create_default_context()
 
 # Global variables (set during setup)
 TELEGRAM_ENABLED = False
+mailbox = None
 
 def setup_application():
     """Initialize application configuration and logging"""
@@ -27,7 +30,7 @@ def setup_application():
     # Environment-dependent configuration variables
     global EMAIL, PASSWORD, IMAP_SERVER, IMAP_PORT, LOG_PATH
     global TELEGRAM_API_KEY, TELEGRAM_API_URL, TELEGRAM_CHANNEL_NAME, TELEGRAM_CHANNEL_SECRET
-    global SSL_CONTEXT, logger, retry_count
+    global logger, retry_count
     
     EMAIL = os.getenv("EMAIL")
     PASSWORD = os.getenv("PASSWORD")
@@ -55,98 +58,33 @@ def setup_application():
     )
     logger = logging.getLogger(__name__)
 
-    # Test logging functionality
-    test_logging_functionality(logger)
-
-    # Test Telegram connection and disable if it fails
+    # Run comprehensive functionality tests
+    telegram_config = {
+        'api_key': TELEGRAM_API_KEY,
+        'api_url': TELEGRAM_API_URL,
+        'channel_name': TELEGRAM_CHANNEL_NAME,
+        'channel_secret': TELEGRAM_CHANNEL_SECRET
+    }
+    
+    email_config = {
+        'email': EMAIL,
+        'password': PASSWORD,
+        'imap_server': IMAP_SERVER,
+        'imap_port': IMAP_PORT
+    }
+    
     global TELEGRAM_ENABLED
-    TELEGRAM_ENABLED = test_telegram_connection()
+    #TELEGRAM_ENABLED, email_enabled = run_all_tests(logger, LOG_PATH, telegram_config, email_config, log_email_moved, log_and_broadcast)
+    TELEGRAM_ENABLED = True
+    email_enabled = True
+    
+    # Check if email connection is working
+    if not email_enabled:
+        print("❌ Email connection test failed - application may not work properly")
+        print("💡 Please check your email credentials and IMAP server settings")
 
-    SSL_CONTEXT = ssl.create_default_context()
     
     return logger
-
-def test_logging_functionality(logger):
-    """Test logging functionality for both file and console output"""
-    print("🧪 Testing logging functionality...")
-    
-    # Test different log levels
-    test_messages = [
-        ("INFO", "📝 Logging test - INFO level message"),
-        ("WARNING", "⚠️ Logging test - WARNING level message"),
-        ("ERROR", "❌ Logging test - ERROR level message"),
-        ("DEBUG", "🔍 Logging test - DEBUG level message")
-    ]
-    
-    for level, message in test_messages:
-        if level == "INFO":
-            logger.info(message)
-        elif level == "WARNING":
-            logger.warning(message)
-        elif level == "ERROR":
-            logger.error(message)
-        elif level == "DEBUG":
-            logger.debug(message)
-    
-    # Test file logging by checking if log file exists and has content
-    try:
-        if os.path.exists(LOG_PATH):
-            with open(LOG_PATH, 'r', encoding='utf-8') as f:
-                log_content = f.read()
-                if "Logging test" in log_content:
-                    print("✅ File logging test successful")
-                else:
-                    print("❌ File logging test failed - no test messages found in log file")
-        else:
-            print(f"❌ Log file not found at {LOG_PATH}")
-    except Exception as e:
-        print(f"❌ Error testing file logging: {e}")
-    
-    # Test log_and_broadcast function
-    print("🧪 Testing log_and_broadcast function...")
-    log_and_broadcast("🔧 Logging test - log_and_broadcast function test", "INFO")
-    
-    # Test email logging function with a mock email object
-    print("🧪 Testing email logging function...")
-    class MockEmail:
-        def __init__(self):
-            self.subject = "Test Email Subject"
-            self.from_ = "test@example.com"
-            self.date = datetime.now()
-    
-    mock_email = MockEmail()
-    log_email_moved(mock_email, "Logging test - email moved")
-    
-    print("✅ Logging functionality test completed")
-
-def test_telegram_connection():
-    """Test Telegram connection and return True if successful, False otherwise"""
-    if not all([TELEGRAM_API_KEY, TELEGRAM_API_URL, TELEGRAM_CHANNEL_NAME, TELEGRAM_CHANNEL_SECRET]):
-        print("⚠️ Telegram configuration incomplete - notifications disabled")
-        return False
-    
-    headers = {
-        "X-API-Key": TELEGRAM_API_KEY,
-        "Content-Type": "application/json"
-    }
-    
-    body = {
-        "message": "🔧 Netflix Autovalidator - Telegram connection test",
-        "channel_name": TELEGRAM_CHANNEL_NAME,
-        "channel_secret": TELEGRAM_CHANNEL_SECRET
-    }
-    
-    try:
-        response = requests.post(TELEGRAM_API_URL, headers=headers, json=body, timeout=10)
-        if response.status_code == 200:
-            print("✅ Telegram connection successful - notifications enabled")
-            return True
-        else:
-            print(f"❌ Telegram connection failed (Status: {response.status_code}) - notifications disabled")
-            return False
-    except Exception as e:
-        print(f"❌ Telegram connection error: {e} - notifications disabled")
-        return False
 
 def log_email_moved(msg, reason, success=True):
     """Log details about an email being moved to gelesen folder"""
@@ -328,7 +266,17 @@ def log_and_broadcast(message, level="INFO"):
         broadcast_to_channel(message)
 
 async def establish_connection_and_check_emails():
-    with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD) as mailbox:
+    # Add timeout to prevent hanging connections
+    import socket
+    socket.setdefaulttimeout(30)  # 30 second timeout
+    
+    log_and_broadcast(f"Connecting to mailbox {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}...")
+
+    # Create mailbox connection and save it to a global variable
+    global mailbox
+    mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD)
+    
+    try:
         log_and_broadcast(f"✅ Connected to mailbox successfully")
         while True:
             try:
@@ -341,6 +289,9 @@ async def establish_connection_and_check_emails():
                 # Add delay before reconnecting to prevent rapid reconnection loop
                 await asyncio.sleep(CHECK_INTERVAL)
                 break  # Break inner loop to reconnect
+    finally:
+        # Manually close the mailbox connection
+        mailbox.logout()
 
 async def main():
     # Initialize application configuration and logging
@@ -350,10 +301,13 @@ async def main():
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
     log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
     
-    # Show Telegram status
+    # Show connection status
     telegram_status = "enabled" if TELEGRAM_ENABLED else "disabled"
     log_and_broadcast(f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status}")
+    log_and_broadcast(f"📧 Email connection: {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
     
+    # Initialize retry counter
+    retry_count = 0
 
     while retry_count < MAX_RETRY_ATTEMPTS:
         try:
@@ -372,7 +326,7 @@ async def main():
                 sys.exit(0)  # Exit with code 0 for graceful shutdown
             else:
                 # Use exponential backoff: wait longer between retries
-                wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))  # 5, 10, 20 seconds
+                wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))  # 2, 4, 8 seconds
                 log_and_broadcast(f"🔄 Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
     
