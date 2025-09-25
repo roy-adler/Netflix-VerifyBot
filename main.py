@@ -270,8 +270,6 @@ async def establish_connection_and_check_emails():
     import socket
     socket.setdefaulttimeout(30)  # 30 second timeout
     
-    log_and_broadcast(f"Connecting to mailbox {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}...")
-
     # Create mailbox connection and save it to a global variable
     global mailbox
     mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD)
@@ -303,8 +301,7 @@ async def main():
     
     # Show connection status
     telegram_status = "enabled" if TELEGRAM_ENABLED else "disabled"
-    log_and_broadcast(f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status}")
-    log_and_broadcast(f"📧 Email connection: {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
+    log_and_broadcast(f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status} for channel {TELEGRAM_CHANNEL_NAME}")
     
     # Initialize retry counter
     retry_count = 0
