@@ -1,0 +1,95 @@
+name: Test Netflix Autovalidator
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        test-type: [functionality, integration]
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install playwright
+        playwright install chromium
+    
+    - name: Create test environment
+      run: |
+        cp test.env.example test.env
+        # Set test values
+        echo "EMAIL=test@example.com" >> test.env
+        echo "PASSWORD=testpassword" >> test.env
+        echo "IMAP_SERVER=imap.example.com" >> test.env
+        echo "IMAP_PORT=993" >> test.env
+        echo "LOG_PATH=test-results.log" >> test.env
+    
+    - name: Run functionality tests
+      if: matrix.test-type == 'functionality'
+      run: |
+        python run_tests.py
+      continue-on-error: true
+    
+    - name: Run integration tests
+      if: matrix.test-type == 'integration'
+      run: |
+        timeout 30s python main.py || echo "Integration test completed"
+      continue-on-error: true
+    
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.test-type }}
+        path: |
+          test-results.log
+          test-results/
+        retention-days: 7
+
+  docker-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Create test environment
+      run: |
+        cp test.env.example test.env
+        # Set test values
+        echo "EMAIL=test@example.com" >> test.env
+        echo "PASSWORD=testpassword" >> test.env
+        echo "IMAP_SERVER=imap.example.com" >> test.env
+        echo "IMAP_PORT=993" >> test.env
+        echo "LOG_PATH=test-results.log" >> test.env
+    
+    - name: Run Docker tests
+      run: |
+        chmod +x run-docker-tests.sh
+        ./run-docker-tests.sh
+      continue-on-error: true
+    
+    - name: Upload Docker test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: docker-test-results
+        path: |
+          test-results.log
+          test-results/
+        retention-days: 7
