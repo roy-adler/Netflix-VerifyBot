@@ -1,16 +1,17 @@
 """
 Test functionality for Netflix Autovalidator
-Tests logging, Telegram connection, and other core functions using the new modular structure
+Tests logging, Telegram connection, and other core functions
 """
 
 import os
+import requests
+import logging
+import ssl
 from datetime import datetime
-from config import Config
-from notifications import NotificationHandler
-from email_handler import EmailHandler, EmailConnectionError
+from dotenv import load_dotenv
+from imap_tools import MailBox
 
-
-def test_logging_functionality(notification_handler: NotificationHandler, log_path: str) -> None:
+def test_logging_functionality(logger, log_path):
     """Test logging functionality for both file and console output"""
     print("🧪 Testing logging functionality...")
     
@@ -24,13 +25,13 @@ def test_logging_functionality(notification_handler: NotificationHandler, log_pa
     
     for level, message in test_messages:
         if level == "INFO":
-            notification_handler.log_info(message)
+            logger.info(message)
         elif level == "WARNING":
-            notification_handler.log_warning(message)
+            logger.warning(message)
         elif level == "ERROR":
-            notification_handler.log_error(message)
+            logger.error(message)
         elif level == "DEBUG":
-            notification_handler.log_debug(message)
+            logger.debug(message)
     
     # Test file logging by checking if log file exists and has content
     try:
@@ -48,110 +49,117 @@ def test_logging_functionality(notification_handler: NotificationHandler, log_pa
     
     print("✅ Logging functionality test completed")
 
-
-def test_telegram_connection(notification_handler: NotificationHandler) -> bool:
+def test_telegram_connection(telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret):
     """Test Telegram connection configuration without sending actual messages"""
-    print("🧪 Testing Telegram connection...")
+    if not all([telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret]):
+        print("⚠️ Telegram configuration incomplete - notifications disabled")
+        return False
     
+    # Test configuration validity without sending actual messages
     try:
-        result = notification_handler.test_telegram_connection()
-        if result:
-            print("✅ Telegram configuration valid - notifications enabled")
-        else:
-            print("⚠️ Telegram configuration invalid - notifications disabled")
-        return result
+        # Just validate the configuration format
+        if not telegram_api_key or len(telegram_api_key) < 10:
+            print("❌ Invalid Telegram API key format - notifications disabled")
+            return False
+        
+        if not telegram_api_url.startswith(('http://', 'https://')):
+            print("❌ Invalid Telegram API URL format - notifications disabled")
+            return False
+        
+        if not telegram_channel_name or not telegram_channel_secret:
+            print("❌ Missing Telegram channel configuration - notifications disabled")
+            return False
+        
+        print("✅ Telegram configuration valid - notifications enabled")
+        return True
+        
     except Exception as e:
         print(f"❌ Telegram configuration error: {e} - notifications disabled")
         return False
 
-
-def test_email_logging(notification_handler: NotificationHandler) -> None:
-    """Test email logging function with mock data"""
+def test_email_logging(log_email_moved_func):
+    """Test email logging function with a mock email object"""
     print("🧪 Testing email logging function...")
     
-    try:
-        notification_handler.log_email_moved(
-            subject="Test Email Subject",
-            sender="test@example.com",
-            date_received=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            reason="Logging test - email moved",
-            success=True
-        )
-        print("✅ Email logging test completed")
-    except Exception as e:
-        print(f"❌ Email logging test failed: {e}")
-
-
-def test_notification_functions(notification_handler: NotificationHandler) -> None:
-    """Test notification functions"""
-    print("🧪 Testing notification functions...")
+    class MockEmail:
+        def __init__(self):
+            self.subject = "Test Email Subject"
+            self.from_ = "test@example.com"
+            self.date = datetime.now()
     
-    try:
-        notification_handler.log_and_broadcast("🔧 Logging test - notification function test", "INFO")
-        print("✅ Notification functions test completed")
-    except Exception as e:
-        print(f"❌ Notification functions test failed: {e}")
+    mock_email = MockEmail()
+    log_email_moved_func(mock_email, "Logging test - email moved")
+    print("✅ Email logging test completed")
 
+def test_log_and_broadcast(log_and_broadcast_func):
+    """Test log_and_broadcast function"""
+    print("🧪 Testing log_and_broadcast function...")
+    log_and_broadcast_func("🔧 Logging test - log_and_broadcast function test", "INFO")
+    print("✅ log_and_broadcast test completed")
 
-def test_email_connection(email_handler: EmailHandler) -> bool:
+def test_email_connection(email, password, imap_server, imap_port):
     """Test email IMAP connection and return True if successful, False otherwise"""
     print("🧪 Testing email IMAP connection...")
     
+    if not all([email, password, imap_server, imap_port]):
+        print("❌ Email configuration incomplete - missing credentials or server settings")
+        return False
+    
     try:
-        # Test connection
-        import asyncio
-        asyncio.run(email_handler.connect())
+        # Create SSL context
+        ssl_context = ssl.create_default_context()
         
-        # Get folder list to verify connection works
-        if email_handler.mailbox:
-            folders = [f.name for f in email_handler.mailbox.folder.list()]
+        # Test connection
+        with MailBox(imap_server, port=imap_port, ssl_context=ssl_context).login(email, password) as mailbox:
+            # Get folder list to verify connection works
+            folders = [f.name for f in mailbox.folder.list()]
             print(f"✅ Email connection successful!")
             print(f"📁 Available folders: {len(folders)} folders found")
-            print(f"📧 Connected as: {email_handler.email_config.email}")
-            print(f"🌐 Server: {email_handler.email_config.imap_server}:{email_handler.email_config.imap_port}")
+            print(f"📧 Connected as: {email}")
+            print(f"🌐 Server: {imap_server}:{imap_port}")
             
             # Check if Gelesen folder exists, if not, mention it will be created
-            gelesen_folder = email_handler.app_config.gelesen_folder
+            gelesen_folder = "Gelesen"
             if gelesen_folder in folders:
                 print(f"✅ '{gelesen_folder}' folder found")
             else:
                 print(f"ℹ️ '{gelesen_folder}' folder not found - will be created when needed")
             
-            # Disconnect
-            asyncio.run(email_handler.disconnect())
             return True
-        else:
-            print("❌ Email connection failed - no mailbox connection")
-            return False
             
-    except EmailConnectionError as e:
-        print(f"❌ Email connection failed: {e}")
-        print("💡 Please check your email credentials and IMAP server settings")
-        return False
     except Exception as e:
         print(f"❌ Email connection failed: {e}")
         print("💡 Please check your email credentials and IMAP server settings")
         return False
 
-
-def run_all_tests(config: Config, notification_handler: NotificationHandler, email_handler: EmailHandler) -> tuple[bool, bool]:
-    """Run all tests with the new modular structure"""
+def run_all_tests(logger, log_path, telegram_config, email_config, log_email_moved_func, log_and_broadcast_func):
+    """Run all tests with provided configuration and functions"""
     print("🚀 Starting comprehensive functionality tests...")
     
     # Test logging
-    test_logging_functionality(notification_handler, config.app.log_path)
+    test_logging_functionality(logger, log_path)
     
-    # Test notification functions
-    test_notification_functions(notification_handler)
+    # Test log_and_broadcast
+    test_log_and_broadcast(log_and_broadcast_func)
     
     # Test email logging
-    test_email_logging(notification_handler)
+    test_email_logging(log_email_moved_func)
     
     # Test email connection
-    email_enabled = test_email_connection(email_handler)
+    email_enabled = test_email_connection(
+        email_config['email'],
+        email_config['password'],
+        email_config['imap_server'],
+        email_config['imap_port']
+    )
     
     # Test Telegram connection
-    telegram_enabled = test_telegram_connection(notification_handler)
+    telegram_enabled = test_telegram_connection(
+        telegram_config['api_key'],
+        telegram_config['api_url'],
+        telegram_config['channel_name'],
+        telegram_config['channel_secret']
+    )
     
     print("✅ All functionality tests completed")
     print(f"📊 Email connection: {'✅ Enabled' if email_enabled else '❌ Disabled'}")
