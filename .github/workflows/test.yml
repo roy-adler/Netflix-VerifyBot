@@ -43,7 +43,7 @@ jobs:
     - name: Run functionality tests
       if: matrix.test-type == 'functionality'
       run: |
-        python run_tests.py
+        python tests/run_tests.py
       continue-on-error: true
     
     - name: Run integration tests

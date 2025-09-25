@@ -50,32 +50,31 @@ def test_logging_functionality(logger, log_path):
     print("✅ Logging functionality test completed")
 
 def test_telegram_connection(telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret):
-    """Test Telegram connection and return True if successful, False otherwise"""
+    """Test Telegram connection configuration without sending actual messages"""
     if not all([telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret]):
         print("⚠️ Telegram configuration incomplete - notifications disabled")
         return False
     
-    headers = {
-        "X-API-Key": telegram_api_key,
-        "Content-Type": "application/json"
-    }
-    
-    body = {
-        "message": "🔧 Netflix Autovalidator - Telegram connection test",
-        "channel_name": telegram_channel_name,
-        "channel_secret": telegram_channel_secret
-    }
-    
+    # Test configuration validity without sending actual messages
     try:
-        response = requests.post(telegram_api_url, headers=headers, json=body, timeout=10)
-        if response.status_code == 200:
-            print("✅ Telegram connection successful - notifications enabled")
-            return True
-        else:
-            print(f"❌ Telegram connection failed (Status: {response.status_code}) - notifications disabled")
+        # Just validate the configuration format
+        if not telegram_api_key or len(telegram_api_key) < 10:
+            print("❌ Invalid Telegram API key format - notifications disabled")
             return False
+        
+        if not telegram_api_url.startswith(('http://', 'https://')):
+            print("❌ Invalid Telegram API URL format - notifications disabled")
+            return False
+        
+        if not telegram_channel_name or not telegram_channel_secret:
+            print("❌ Missing Telegram channel configuration - notifications disabled")
+            return False
+        
+        print("✅ Telegram configuration valid - notifications enabled")
+        return True
+        
     except Exception as e:
-        print(f"❌ Telegram connection error: {e} - notifications disabled")
+        print(f"❌ Telegram configuration error: {e} - notifications disabled")
         return False
 
 def test_email_logging(log_email_moved_func):

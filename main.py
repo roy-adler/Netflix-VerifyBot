@@ -9,7 +9,6 @@ import logging
 from datetime import datetime, timezone
 import requests
 import re
-from test_functionality import run_all_tests
 
 # Global constants
 GELESEN_FOLDER = "Gelesen"
@@ -18,31 +17,28 @@ MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
 SSL_CONTEXT = ssl.create_default_context()
 
-# Global variables (set during setup)
-TELEGRAM_ENABLED = False
-mailbox = None
+# Global variables
+EMAIL = os.getenv("EMAIL")
+PASSWORD = os.getenv("PASSWORD")
+IMAP_SERVER = os.getenv("IMAP_SERVER")
+IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+LOG_PATH = os.getenv("LOG_PATH", "netflix-validator.log")
+TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY")
+TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL")
+TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME")
+TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET")
+retry_count = 0
+logger = None  # Will be initialized in setup_application()
+TELEGRAM_ENABLED = True  # Will be set in setup_application()
+    
 
 def setup_application():
     """Initialize application configuration and logging"""
+    global logger, TELEGRAM_ENABLED
+    
     # Load environment variables
     load_dotenv("config.env")
-    
-    # Environment-dependent configuration variables
-    global EMAIL, PASSWORD, IMAP_SERVER, IMAP_PORT, LOG_PATH
-    global TELEGRAM_API_KEY, TELEGRAM_API_URL, TELEGRAM_CHANNEL_NAME, TELEGRAM_CHANNEL_SECRET
-    global logger, retry_count
-    
-    EMAIL = os.getenv("EMAIL")
-    PASSWORD = os.getenv("PASSWORD")
-    IMAP_SERVER = os.getenv("IMAP_SERVER")
-    IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-    LOG_PATH = os.getenv("LOG_PATH", "netflix-validator.log")
-    TELEGRAM_API_KEY = os.getenv("TELEGRAM_API_KEY")
-    TELEGRAM_API_URL = os.getenv("TELEGRAM_API_URL")
-    TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME")
-    TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET")
-    retry_count = 0
-    
+   
     # Configure logging
     log_dir = os.path.dirname(LOG_PATH)
     if log_dir and not os.path.exists(log_dir):
@@ -58,31 +54,8 @@ def setup_application():
     )
     logger = logging.getLogger(__name__)
 
-    # Run comprehensive functionality tests
-    telegram_config = {
-        'api_key': TELEGRAM_API_KEY,
-        'api_url': TELEGRAM_API_URL,
-        'channel_name': TELEGRAM_CHANNEL_NAME,
-        'channel_secret': TELEGRAM_CHANNEL_SECRET
-    }
-    
-    email_config = {
-        'email': EMAIL,
-        'password': PASSWORD,
-        'imap_server': IMAP_SERVER,
-        'imap_port': IMAP_PORT
-    }
-    
-    global TELEGRAM_ENABLED
-    #TELEGRAM_ENABLED, email_enabled = run_all_tests(logger, LOG_PATH, telegram_config, email_config, log_email_moved, log_and_broadcast)
-    TELEGRAM_ENABLED = True
-    email_enabled = True
-    
-    # Check if email connection is working
-    if not email_enabled:
-        print("❌ Email connection test failed - application may not work properly")
-        print("💡 Please check your email credentials and IMAP server settings")
-
+    # Set global variables for the application
+    TELEGRAM_ENABLED = bool(TELEGRAM_API_KEY and TELEGRAM_API_URL and TELEGRAM_CHANNEL_NAME and TELEGRAM_CHANNEL_SECRET)
     
     return logger
 
@@ -251,15 +224,21 @@ def broadcast_to_channel(message):
 
 def log_and_broadcast(message, level="INFO"):
     """Log to file and broadcast to Telegram channel"""
-    # Log to file
-    if level == "INFO":
-        logger.info(message)
-    elif level == "ERROR":
-        logger.error(message)
-    elif level == "WARNING":
-        logger.warning(message)
-    elif level == "DEBUG":
-        logger.debug(message)
+    global logger
+    
+    # Log to file (only if logger is initialized)
+    if logger is not None:
+        if level == "INFO":
+            logger.info(message)
+        elif level == "ERROR":
+            logger.error(message)
+        elif level == "WARNING":
+            logger.warning(message)
+        elif level == "DEBUG":
+            logger.debug(message)
+    else:
+        # Fallback to print if logger not initialized
+        print(f"[{level}] {message}")
     
     # Broadcast to Telegram (only for important messages)
     if level in ["INFO", "ERROR", "WARNING"]:
@@ -270,8 +249,7 @@ async def establish_connection_and_check_emails():
     import socket
     socket.setdefaulttimeout(30)  # 30 second timeout
     
-    # Create mailbox connection and save it to a global variable
-    global mailbox
+    log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
     mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(EMAIL, PASSWORD)
     
     try:
@@ -292,13 +270,32 @@ async def establish_connection_and_check_emails():
         mailbox.logout()
 
 async def main():
+    log_and_broadcast(f"Testing application configuration...")
+
+    # Run comprehensive tests before starting the main application
+    try:
+        # Import and run the test suite
+        from tests.run_tests import main as run_tests_main
+        test_exit_code = run_tests_main()
+        
+        if test_exit_code != 0:
+            print("❌ Pre-startup tests failed! Application will not start.")
+            import sys
+            sys.exit(1)
+        
+    except Exception as e:
+        print(f"❌ Error running pre-startup tests: {e}")
+        import sys
+        sys.exit(1)
+    
+    log_and_broadcast(f"Testing successful!")
+
     # Initialize application configuration and logging
     logger = setup_application()
     
-    print("🚀 Starting main function")
+    # Now we can use log_and_broadcast since logger is defined
     log_and_broadcast(f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds")
-    log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
-    
+
     # Show connection status
     telegram_status = "enabled" if TELEGRAM_ENABLED else "disabled"
     log_and_broadcast(f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status} for channel {TELEGRAM_CHANNEL_NAME}")

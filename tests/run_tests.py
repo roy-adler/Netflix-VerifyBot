@@ -7,7 +7,7 @@ Can be run independently to test functionality without starting the main applica
 import os
 import logging
 from dotenv import load_dotenv
-from test_functionality import run_all_tests
+from .test_functionality import run_all_tests
 
 def setup_test_environment():
     """Setup test environment similar to main application"""
@@ -57,8 +57,8 @@ def mock_log_and_broadcast(message, level="INFO"):
 
 def main():
     """Run all tests independently"""
-    print("🧪 Running Netflix Autovalidator Tests...")
-    print("=" * 50)
+    print("🧪 Running Netflix Autovalidator Pre-Startup Tests...")
+    print("=" * 60)
     
     try:
         # Setup test environment
@@ -74,17 +74,25 @@ def main():
             mock_log_and_broadcast
         )
         
-        print("=" * 50)
-        print(f"✅ All tests completed successfully!")
+        print("=" * 60)
+        print(f"✅ All pre-startup tests completed!")
         print(f"📊 Email connection: {'✅ Enabled' if email_enabled else '❌ Disabled'}")
         print(f"📊 Telegram notifications: {'✅ Enabled' if telegram_enabled else '❌ Disabled'}")
         print(f"📝 Log file: {log_path}")
         
+        # Fail if critical services are unavailable
+        if not email_enabled:
+            print("❌ Email connection failed - this is required for the application to work")
+            print("💡 Please check your email credentials and IMAP server settings")
+            return 1
+        
+        print("🚀 Application is ready to start!")
+        return 0
+        
     except Exception as e:
-        print(f"❌ Test failed with error: {e}")
+        print(f"❌ Pre-startup test failed with error: {e}")
+        print("💡 Please check your configuration and try again")
         return 1
-    
-    return 0
 
 if __name__ == "__main__":
     exit(main())
