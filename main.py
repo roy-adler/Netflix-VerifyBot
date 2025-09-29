@@ -109,6 +109,8 @@ async def click_confirmation_link(url):
         
         # Wait for a confirmation message or page change to verify success
         response = await page.goto(url)
+        await page.wait_for_timeout(3000)
+        
         await browser.close()
         if response and response.status == 200:
             log_and_broadcast("✅ Confirmation link clicked successfully!")
