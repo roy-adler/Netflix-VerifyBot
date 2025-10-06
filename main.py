@@ -104,19 +104,28 @@ async def click_confirmation_link(url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        await page.goto(url)
-        await page.wait_for_selector('[data-uia="set-primary-location-action"]', timeout=5000)
-        
-        # Wait for a confirmation message or page change to verify success
+        # Navigate to the page
         response = await page.goto(url)
-        await page.wait_for_timeout(3000)
-        
-        await browser.close()
-        if response and response.status == 200:
-            log_and_broadcast("✅ Confirmation link clicked successfully!")
-        else:
-            logger.warning(f"⚠️ Loading error. Status: {response.status if response else 'No response'}")
+        if not response or response.status != 200:
+            logger.warning(f"⚠️ Failed to load page. Status: {response.status if response else 'No response'}")
+            await browser.close()
             return False
+        
+        # Wait for the button and click it
+        await page.wait_for_selector('[data-uia="set-primary-location-action"]', timeout=5000)
+        await page.click('[data-uia="set-primary-location-action"]', timeout=5000)
+        log_and_broadcast("✅ Confirmation link clicked successfully!")
+        
+        # Wait a bit for any page changes/redirects after clicking
+        await page.wait_for_timeout(2000)  # Wait 2 seconds
+        
+        # Check the current page after clicking
+        current_url = page.url
+        logger.info(f"📍 Current page after click: {current_url}")
+        
+        # Close the browser
+        await browser.close()
+        
         return True
 
 async def check_emails(mailbox):
