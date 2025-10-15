@@ -12,9 +12,10 @@ import re
 
 # Global constants
 GELESEN_FOLDER = "Gelesen"
-CHECK_INTERVAL = 3  # seconds
+CHECK_INTERVAL = 1  # seconds
 MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
 MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
+CONNECTION_REFRESH_INTERVAL = 3600  # 3600 seconds = 1 hour
 SSL_CONTEXT = ssl.create_default_context()
 
 # Global variables
@@ -32,6 +33,7 @@ TELEGRAM_INFO_CHANNEL_SECRET = os.getenv("TELEGRAM_INFO_CHANNEL_SECRET")
 retry_count = 0
 logger = None  # Will be initialized in setup_application()
 TELEGRAM_ENABLED = True  # Will be set in setup_application()
+connection_start_time = None  # Track when current connection was established
 
 
 def setup_application():
@@ -323,26 +325,44 @@ async def establish_connection_and_check_emails():
         EMAIL, PASSWORD
     )
 
-    retry_count = 0
-   
     try:
+        global connection_start_time
+        connection_start_time = datetime.now()
         log_and_broadcast(f"✅ Connected to mailbox successfully")
+        
         while True:
             try:
+                # Check if we need to refresh the connection (every hour)
+                current_time = datetime.now()
+                if connection_start_time and (current_time - connection_start_time).total_seconds() >= CONNECTION_REFRESH_INTERVAL:
+                    log_and_broadcast("🔄 Connection refresh needed (1 hour reached) - reconnecting...")
+                    break  # Break to reconnect
+                
                 await check_emails(mailbox)
                 logger.debug(
                     f"💤 Waiting {CHECK_INTERVAL} seconds before next check..."
                 )
                 await asyncio.sleep(CHECK_INTERVAL)
             except Exception as e:
-                log_and_broadcast(f"❌ Error in check_emails: {e}", "ERROR")
-                log_and_broadcast("🔄 Reconnecting...")
+                error_msg = str(e).lower()
+                # Check if it's an SSL/TLS connection error
+                if any(keyword in error_msg for keyword in ['ssl', 'tls', 'connection', 'eof', 'closed']):
+                    log_and_broadcast(f"🔌 SSL/TLS connection error detected: {e}", "ERROR")
+                    log_and_broadcast("🔄 Forcing reconnection due to connection issue...")
+                else:
+                    log_and_broadcast(f"❌ Error in check_emails: {e}", "ERROR")
+                    log_and_broadcast("🔄 Reconnecting...")
+                
                 # Add delay before reconnecting to prevent rapid reconnection loop
                 await asyncio.sleep(CHECK_INTERVAL)
                 break  # Break inner loop to reconnect
     finally:
         # Manually close the mailbox connection
-        mailbox.logout()
+        try:
+            mailbox.logout()
+            log_and_broadcast("📤 Mailbox connection closed")
+        except Exception as e:
+            log_and_broadcast(f"⚠️ Error closing mailbox connection: {e}", "WARNING")
 
 
 async def main():
