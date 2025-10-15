@@ -323,6 +323,8 @@ async def establish_connection_and_check_emails():
         EMAIL, PASSWORD
     )
 
+    retry_count = 0
+   
     try:
         log_and_broadcast(f"✅ Connected to mailbox successfully")
         while True:
@@ -388,7 +390,7 @@ async def main():
         try:
             await establish_connection_and_check_emails()
             # If we reach here, connection was successful, reset retry count
-            retry_count = 0
+            
 
         except Exception as e:
             retry_count += 1
