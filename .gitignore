@@ -1,3 +1,4 @@
 config.env
 compose.yaml
 compose.yml
+logs/
