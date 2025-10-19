@@ -320,7 +320,7 @@ async def establish_connection_and_check_emails():
 
     socket.setdefaulttimeout(30)  # 30 second timeout
 
-    log_and_broadcast(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
+    logger.info(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
     mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(
         EMAIL, PASSWORD
     )
@@ -328,20 +328,17 @@ async def establish_connection_and_check_emails():
     try:
         global connection_start_time
         connection_start_time = datetime.now()
-        log_and_broadcast(f"✅ Connected to mailbox successfully")
+        logger.info("✅ Connected to mailbox successfully")
         
         while True:
             try:
                 # Check if we need to refresh the connection (every hour)
                 current_time = datetime.now()
                 if connection_start_time and (current_time - connection_start_time).total_seconds() >= CONNECTION_REFRESH_INTERVAL:
-                    log_and_broadcast("🔄 Connection refresh needed (1 hour reached) - reconnecting...")
+                    logger.info("🔄 Connection refresh needed (1 hour reached) - reconnecting...")
                     break  # Break to reconnect
                 
                 await check_emails(mailbox)
-                logger.debug(
-                    f"💤 Waiting {CHECK_INTERVAL} seconds before next check..."
-                )
                 await asyncio.sleep(CHECK_INTERVAL)
             except Exception as e:
                 error_msg = str(e).lower()
@@ -360,7 +357,7 @@ async def establish_connection_and_check_emails():
         # Manually close the mailbox connection
         try:
             mailbox.logout()
-            log_and_broadcast("📤 Mailbox connection closed")
+            logger.info("📤 Mailbox connection closed")
         except Exception as e:
             log_and_broadcast(f"⚠️ Error closing mailbox connection: {e}", "WARNING")
 
