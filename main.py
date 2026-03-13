@@ -60,8 +60,8 @@ def setup_application():
 
     # Set global variables for the application
     TELEGRAM_ENABLED = bool(
-        TELEGRAM_API_KEY
-        and TELEGRAM_API_URL
+        TELEGRAM_CHANNEL_BOT_API_KEY
+        and TELEGRAM_CHANNEL_BOT_API_URL
         and TELEGRAM_CHANNEL_NAME
         and TELEGRAM_CHANNEL_SECRET
     )
@@ -261,7 +261,7 @@ def broadcast_to_channel(message, public=False):
     # if not TELEGRAM_ENABLED:
     #    return None
 
-    headers = {"X-API-Key": TELEGRAM_API_KEY, "Content-Type": "application/json"}
+    headers = {"X-API-Key": TELEGRAM_CHANNEL_BOT_API_KEY, "Content-Type": "application/json"}
 
     public_body = {
         "message": message,
@@ -277,12 +277,12 @@ def broadcast_to_channel(message, public=False):
 
     try:
         response = requests.post(
-            TELEGRAM_API_URL, headers=headers, json=info_body, timeout=10
+            TELEGRAM_CHANNEL_BOT_API_URL, headers=headers, json=info_body, timeout=10
         )
 
         if public:
             response = requests.post(
-                TELEGRAM_API_URL, headers=headers, json=public_body, timeout=10
+                TELEGRAM_CHANNEL_BOT_API_URL, headers=headers, json=public_body, timeout=10
             )
 
         return response.json() if response.status_code == 200 else None

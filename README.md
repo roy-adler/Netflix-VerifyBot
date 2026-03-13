@@ -35,8 +35,8 @@ Copy `config.env.example` to `config.env` and configure:
 
 ### Optional
 - `LOG_PATH`: Log file path (default: "netflix-validator.log")
-- `TELEGRAM_API_KEY`: API key for notifications
-- `TELEGRAM_API_URL`: Telegram bot API URL
+- `TELEGRAM_CHANNEL_BOT_API_KEY`: API key for notifications
+- `TELEGRAM_CHANNEL_BOT_API_URL`: Telegram bot API URL
 - `TELEGRAM_CHANNEL_NAME`: Channel name
 - `TELEGRAM_CHANNEL_SECRET`: Channel secret
 

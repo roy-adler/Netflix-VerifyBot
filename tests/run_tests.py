@@ -17,8 +17,8 @@ def setup_test_environment():
     # Get configuration
     log_path = os.getenv("LOG_PATH", "netflix-validator.log")
     telegram_config = {
-        'api_key': os.getenv("TELEGRAM_API_KEY"),
-        'api_url': os.getenv("TELEGRAM_API_URL"),
+        'api_key': os.getenv("TELEGRAM_CHANNEL_BOT_API_KEY"),
+        'api_url': os.getenv("TELEGRAM_CHANNEL_BOT_API_URL"),
         'channel_name': os.getenv("TELEGRAM_CHANNEL_NAME"),
         'channel_secret': os.getenv("TELEGRAM_CHANNEL_SECRET")
     }

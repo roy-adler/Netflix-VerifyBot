@@ -49,20 +49,20 @@ def test_logging_functionality(logger, log_path):
     
     print("✅ Logging functionality test completed")
 
-def test_telegram_connection(telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret):
+def test_telegram_connection(TELEGRAM_CHANNEL_BOT_API_KEY, TELEGRAM_CHANNEL_BOT_API_URL, telegram_channel_name, telegram_channel_secret):
     """Test Telegram connection configuration without sending actual messages"""
-    if not all([telegram_api_key, telegram_api_url, telegram_channel_name, telegram_channel_secret]):
+    if not all([TELEGRAM_CHANNEL_BOT_API_KEY, TELEGRAM_CHANNEL_BOT_API_URL, telegram_channel_name, telegram_channel_secret]):
         print("⚠️ Telegram configuration incomplete - notifications disabled")
         return False
     
     # Test configuration validity without sending actual messages
     try:
         # Just validate the configuration format
-        if not telegram_api_key or len(telegram_api_key) < 10:
+        if not TELEGRAM_CHANNEL_BOT_API_KEY or len(TELEGRAM_CHANNEL_BOT_API_KEY) < 10:
             print("❌ Invalid Telegram API key format - notifications disabled")
             return False
         
-        if not telegram_api_url.startswith(('http://', 'https://')):
+        if not TELEGRAM_CHANNEL_BOT_API_URL.startswith(('http://', 'https://')):
             print("❌ Invalid Telegram API URL format - notifications disabled")
             return False
         

@@ -36,7 +36,7 @@ python main.py  # Tests run automatically before startup
 ## Test Requirements
 
 - Email credentials (EMAIL, PASSWORD, IMAP_SERVER, IMAP_PORT)
-- Telegram credentials (optional - TELEGRAM_API_KEY, etc.)
+- Telegram credentials (optional - TELEGRAM_CHANNEL_BOT_API_KEY, etc.)
 - Environment file: `config.env` or `test.env`
 
 ## Test Results
