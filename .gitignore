@@ -2,3 +2,4 @@ config.env
 compose.yaml
 compose.yml
 logs/
+.DS_Store
