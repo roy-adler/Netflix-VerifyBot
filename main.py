@@ -152,7 +152,6 @@ def _extract_url(html, pattern):
 async def check_emails(mailbox):
     """Check emails using existing mailbox connection"""
     try:
-        print("📧 Checking for new emails...")
         current_time = datetime.now(timezone.utc)
 
         for msg in mailbox.fetch(reverse=True):
@@ -328,6 +327,7 @@ async def establish_connection_and_check_emails():
     try:
         connection_start_time = datetime.now()
         logger.info("✅ Connected to mailbox successfully")
+        logger.info("📧 Checking for new emails...")
 
         while True:
             current_time = datetime.now()
