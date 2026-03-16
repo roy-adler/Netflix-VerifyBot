@@ -322,9 +322,10 @@ async def establish_connection_and_check_emails():
 
     logger.info(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
 
-    with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(
+    mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(
         EMAIL, PASSWORD
-    ) as mailbox:
+    )
+    try:
         connection_start_time = datetime.now()
         logger.info("✅ Connected to mailbox successfully")
 
@@ -340,6 +341,12 @@ async def establish_connection_and_check_emails():
 
             await check_emails(mailbox)
             await asyncio.sleep(CHECK_INTERVAL)
+    finally:
+        try:
+            mailbox.logout()
+            logger.info("📤 Mailbox connection closed")
+        except Exception as e:
+            log_and_broadcast(f"⚠️ Error closing mailbox connection: {e}", "WARNING")
 
 
 async def main():
