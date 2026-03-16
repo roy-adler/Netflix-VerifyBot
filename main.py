@@ -346,7 +346,7 @@ async def establish_connection_and_check_emails():
             mailbox.logout()
             logger.info("📤 Mailbox connection closed")
         except Exception as e:
-            log_and_broadcast(f"⚠️ Error closing mailbox connection: {e}", "WARNING")
+            logger.warning(f"⚠️ Error closing mailbox connection: {e}")
 
 
 async def main():
@@ -377,18 +377,37 @@ async def main():
     )
 
     retry_count = 0
+    last_error = None  # Holds error from first disconnect to check if it was transient
 
     while retry_count < MAX_RETRY_ATTEMPTS:
         try:
             await establish_connection_and_check_emails()
-            retry_count = 0  # Reset on successful connection cycle
+
+            # Reconnect succeeded — check if we just recovered from a brief disconnection
+            if last_error is not None:
+                log_and_broadcast(
+                    f"⚡ Brief disconnection, reconnected successfully (was: {last_error})"
+                )
+                last_error = None
+
+            retry_count = 0
 
         except Exception as e:
             retry_count += 1
-            log_and_broadcast(
-                f"❌ Failed to connect (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}",
-                "ERROR",
-            )
+            last_error = str(e)
+
+            if retry_count == 1:
+                # First failure — could be transient (e.g. server restart at midnight)
+                # Log to file only and silently retry before alarming
+                logger.warning(
+                    f"⚠️ Connection dropped, retrying silently (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}"
+                )
+            else:
+                # Second+ failure in a row — this is a real problem
+                log_and_broadcast(
+                    f"❌ Persistent connection issue (attempt {retry_count}/{MAX_RETRY_ATTEMPTS}): {e}",
+                    "ERROR",
+                )
 
             if retry_count >= MAX_RETRY_ATTEMPTS:
                 log_and_broadcast(
@@ -402,7 +421,7 @@ async def main():
                 sys.exit(0)
             else:
                 wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))
-                log_and_broadcast(f"🔄 Retrying in {wait_time} seconds...")
+                logger.info(f"🔄 Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
 
     log_and_broadcast(
