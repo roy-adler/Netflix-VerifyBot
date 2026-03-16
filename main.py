@@ -1,22 +1,27 @@
 import asyncio
 import os
+import sys
+import socket
 from dotenv import load_dotenv
 import ssl
 from imap_tools import MailBox
 from playwright.async_api import async_playwright
-import time
 import logging
 from datetime import datetime, timezone
 import requests
 import re
 
+# Load environment variables before reading them
+load_dotenv("config.env")
+
 # Global constants
 GELESEN_FOLDER = "Gelesen"
 CHECK_INTERVAL = 1  # seconds
 MINUTES_TO_WAIT = 900  # 900 seconds = 15 minutes
-MAX_RETRY_ATTEMPTS = 3  # Maximum retry attempts before giving up
+MAX_RETRY_ATTEMPTS = 3
 CONNECTION_REFRESH_INTERVAL = 3600  # 3600 seconds = 1 hour
 SSL_CONTEXT = ssl.create_default_context()
+socket.setdefaulttimeout(30)
 
 # Global variables
 EMAIL = os.getenv("EMAIL")
@@ -30,20 +35,20 @@ TELEGRAM_CHANNEL_NAME = os.getenv("TELEGRAM_CHANNEL_NAME")
 TELEGRAM_CHANNEL_SECRET = os.getenv("TELEGRAM_CHANNEL_SECRET")
 TELEGRAM_INFO_CHANNEL_NAME = os.getenv("TELEGRAM_INFO_CHANNEL_NAME")
 TELEGRAM_INFO_CHANNEL_SECRET = os.getenv("TELEGRAM_INFO_CHANNEL_SECRET")
-retry_count = 0
-logger = None  # Will be initialized in setup_application()
-TELEGRAM_ENABLED = True  # Will be set in setup_application()
-connection_start_time = None  # Track when current connection was established
+TELEGRAM_ENABLED = bool(
+    TELEGRAM_CHANNEL_BOT_API_KEY
+    and TELEGRAM_CHANNEL_BOT_API_URL
+    and TELEGRAM_CHANNEL_NAME
+    and TELEGRAM_CHANNEL_SECRET
+)
+logger = None
+connection_start_time = None
 
 
 def setup_application():
-    """Initialize application configuration and logging"""
-    global logger, TELEGRAM_ENABLED
+    """Initialize application logging"""
+    global logger
 
-    # Load environment variables
-    load_dotenv("config.env")
-
-    # Configure logging
     log_dir = os.path.dirname(LOG_PATH)
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)
@@ -53,19 +58,10 @@ def setup_application():
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             logging.FileHandler(LOG_PATH),
-            logging.StreamHandler(),  # Also log to console
+            logging.StreamHandler(),
         ],
     )
     logger = logging.getLogger(__name__)
-
-    # Set global variables for the application
-    TELEGRAM_ENABLED = bool(
-        TELEGRAM_CHANNEL_BOT_API_KEY
-        and TELEGRAM_CHANNEL_BOT_API_URL
-        and TELEGRAM_CHANNEL_NAME
-        and TELEGRAM_CHANNEL_SECRET
-    )
-
     return logger
 
 
@@ -90,7 +86,6 @@ def log_email_moved(msg, reason, success=True):
         )
 
         logger.info(log_message)
-        print(log_message)
 
     except Exception as e:
         logger.error(f"Error logging email details: {e}")
@@ -110,10 +105,13 @@ async def click_verification_code_link(url):
         )
         await browser.close()
         if verification_code:
-            log_and_broadcast(f"| Account Access from Phone/Tablet | \n 🔢 Verification code: {verification_code}", public=True)
+            log_and_broadcast(
+                f"| Account Access from Phone/Tablet | \n 🔢 Verification code: {verification_code}",
+                public=True,
+            )
             return verification_code
         else:
-            log_and_broadcast(f"❌ No verification code found", public=True)
+            log_and_broadcast("❌ No verification code found", public=True)
             return False
 
 
@@ -122,7 +120,6 @@ async def click_confirmation_link(url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        # Navigate to the page
         response = await page.goto(url)
         if not response or response.status != 200:
             logger.warning(
@@ -131,30 +128,31 @@ async def click_confirmation_link(url):
             await browser.close()
             return False
 
-        # Wait for the button and click it
         await page.wait_for_selector(
             '[data-uia="set-primary-location-action"]', timeout=5000
         )
         await page.click('[data-uia="set-primary-location-action"]', timeout=5000)
         log_and_broadcast("✅ Confirmation link clicked successfully!")
 
-        # Wait a bit for any page changes/redirects after clicking
-        await page.wait_for_timeout(2000)  # Wait 2 seconds
+        await page.wait_for_timeout(2000)
 
-        # Check the current page after clicking
         current_url = page.url
         logger.info(f"📍 Current page after click: {current_url}")
 
-        # Close the browser
         await browser.close()
-
         return True
+
+
+def _extract_url(html, pattern):
+    """Extract a URL from HTML using regex."""
+    match = re.search(pattern, html)
+    return match.group(0) if match else None
 
 
 async def check_emails(mailbox):
     """Check emails using existing mailbox connection"""
     try:
-        print(f"📧 Checking for new emails...")
+        print("📧 Checking for new emails...")
         current_time = datetime.now(timezone.utc)
 
         for msg in mailbox.fetch(reverse=True):
@@ -174,69 +172,77 @@ async def check_emails(mailbox):
                             f"📦 Email '{msg.subject}' moved to Gelesen (older than 15 minutes AND read)"
                         )
                         log_email_moved(msg, "Email older than 15 minutes AND read")
-                        continue  # Skip further processing for this email
+                        continue
 
                 if "accountaccess" in html:
-                    start = html.find("https://www.netflix.com/accountaccess")
-                    end = html.find('"', start)
-                    url = html[start:end]
+                    url = _extract_url(
+                        html, r'https://www\.netflix\.com/accountaccess[^"\s>]+'
+                    )
+                    if url:
+                        log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
 
-                    log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
+                        match = re.search(r"<td[^>]*>\s*(\d{4})\s*</td>", html)
+                        if match:
+                            verification_code = match.group(1)
+                            log_and_broadcast(
+                                f"| New login verification code| \n🔢 Verification code: {verification_code}",
+                                public=True,
+                            )
+                        else:
+                            log_and_broadcast(
+                                "❌ No verification code found", public=True
+                            )
 
-                    # Extract verification code from HTML using Regex - look anywhere in HTML for 4-digit number
-                    match = re.search(r"<td[^>]*>\s*(\d{4})\s*</td>", html)
-                    if match:
-                        verification_code = match.group(1)
                         log_and_broadcast(
-                            f"| New login verification code| \n🔢 Verification code: {verification_code}", public=True
+                            f"📦 Email '{msg.subject}' moved to Gelesen"
                         )
-                    else:
-                        log_and_broadcast(f"❌ No verification code found", public=True)
-
-                    log_and_broadcast(f"📦 Email '{msg.subject}' moved to Gelesen")
-                    mailbox.move(msg.uid, GELESEN_FOLDER)
+                        mailbox.move(msg.uid, GELESEN_FOLDER)
 
                 if "travel/verify" in html:
-                    start = html.find("https://www.netflix.com/account/travel/verify")
-                    end = html.find('"', start)
-                    url = html[start:end]
-
-                    log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
-
-                    # Extract verification code from HTML
-                    verification_code_successful = await click_verification_code_link(
-                        url
+                    url = _extract_url(
+                        html,
+                        r'https://www\.netflix\.com/account/travel/verify[^"\s>]+',
                     )
-                    if verification_code_successful:
-                        mailbox.move(msg.uid, GELESEN_FOLDER)
-                        log_and_broadcast("📦 Email moved to Gelesen folder")
-                        log_email_moved(msg, "Netflix verification code link clicked")
-                    else:
-                        log_and_broadcast(f"❌ No verification code found")
+                    if url:
+                        log_and_broadcast(f"✅ Found Netflix link!:\n{url}")
+
+                        verification_code_successful = (
+                            await click_verification_code_link(url)
+                        )
+                        if verification_code_successful:
+                            mailbox.move(msg.uid, GELESEN_FOLDER)
+                            log_and_broadcast("📦 Email moved to Gelesen folder")
+                            log_email_moved(
+                                msg, "Netflix verification code link clicked"
+                            )
+                        else:
+                            log_and_broadcast("❌ No verification code found")
 
                 if "update-primary-location" in html:
-                    start = html.find(
-                        "https://www.netflix.com/account/update-primary-location"
+                    url = _extract_url(
+                        html,
+                        r'https://www\.netflix\.com/account/update-primary-location[^"\s>]+',
                     )
-                    end = html.find('"', start)
-                    url = html[start:end]
-
-                    log_and_broadcast(f"| Update primary location | \n✅ Found Netflix link!:\n{url}", public=True)
-
-                    confirmation_successful = await click_confirmation_link(url)
-
-                    if confirmation_successful:
-                        mailbox.move(msg.uid, GELESEN_FOLDER)
-                        log_and_broadcast("📦 Email moved to Gelesen folder")
-                        log_email_moved(msg, "Netflix update link clicked")
-                    else:
+                    if url:
                         log_and_broadcast(
-                            "❌ Failed to click confirmation link, email not moved",
-                            "WARNING",
+                            f"| Update primary location | \n✅ Found Netflix link!:\n{url}",
                             public=True,
                         )
+
+                        confirmation_successful = await click_confirmation_link(url)
+
+                        if confirmation_successful:
+                            mailbox.move(msg.uid, GELESEN_FOLDER)
+                            log_and_broadcast("📦 Email moved to Gelesen folder")
+                            log_email_moved(msg, "Netflix update link clicked")
+                        else:
+                            log_and_broadcast(
+                                "❌ Failed to click confirmation link, email not moved",
+                                "WARNING",
+                                public=True,
+                            )
+
             except Exception as msg_error:
-                # Log individual email processing errors but don't break the entire check
                 logger.warning(
                     f"⚠️ Error processing email '{msg.subject if hasattr(msg, 'subject') else 'Unknown'}': {msg_error}"
                 )
@@ -244,29 +250,23 @@ async def check_emails(mailbox):
 
     except Exception as e:
         logger.error(f"❌ Error checking emails: {e}")
-        # Only re-raise critical errors that require reconnection
-        if (
-            "connection" in str(e).lower()
-            or "timeout" in str(e).lower()
-            or "ssl" in str(e).lower()
+        if any(
+            keyword in str(e).lower()
+            for keyword in ["connection", "timeout", "ssl", "eof", "closed"]
         ):
             raise
         else:
-            # For other errors, just log and continue
             logger.warning(f"⚠️ Non-critical error, continuing: {e}")
 
 
 def broadcast_to_channel(message, public=False):
     """Send message to Telegram channel(s) if enabled"""
-    # if not TELEGRAM_ENABLED:
-    #    return None
+    if not TELEGRAM_ENABLED:
+        return None
 
-    headers = {"X-API-Key": TELEGRAM_CHANNEL_BOT_API_KEY, "Content-Type": "application/json"}
-
-    public_body = {
-        "message": message,
-        "channel_name": TELEGRAM_CHANNEL_NAME,
-        "channel_secret": TELEGRAM_CHANNEL_SECRET,
+    headers = {
+        "X-API-Key": TELEGRAM_CHANNEL_BOT_API_KEY,
+        "Content-Type": "application/json",
     }
 
     info_body = {
@@ -281,8 +281,16 @@ def broadcast_to_channel(message, public=False):
         )
 
         if public:
+            public_body = {
+                "message": message,
+                "channel_name": TELEGRAM_CHANNEL_NAME,
+                "channel_secret": TELEGRAM_CHANNEL_SECRET,
+            }
             response = requests.post(
-                TELEGRAM_CHANNEL_BOT_API_URL, headers=headers, json=public_body, timeout=10
+                TELEGRAM_CHANNEL_BOT_API_URL,
+                headers=headers,
+                json=public_body,
+                timeout=10,
             )
 
         return response.json() if response.status_code == 200 else None
@@ -293,9 +301,6 @@ def broadcast_to_channel(message, public=False):
 
 def log_and_broadcast(message, level="INFO", public=False):
     """Log to file and broadcast to Telegram channel"""
-    global logger
-
-    # Log to file (only if logger is initialized)
     if logger is not None:
         if level == "INFO":
             logger.info(message)
@@ -306,108 +311,70 @@ def log_and_broadcast(message, level="INFO", public=False):
         elif level == "DEBUG":
             logger.debug(message)
     else:
-        # Fallback to print if logger not initialized
         print(f"[{level}] {message}")
 
-    # Broadcast to Telegram (only for important messages)
     if level in ["INFO", "ERROR", "WARNING"]:
         broadcast_to_channel(message, public)
 
 
 async def establish_connection_and_check_emails():
-    # Add timeout to prevent hanging connections
-    import socket
-
-    socket.setdefaulttimeout(30)  # 30 second timeout
+    global connection_start_time
 
     logger.info(f"📡 Connecting to {IMAP_SERVER}:{IMAP_PORT} as {EMAIL}")
-    mailbox = MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(
-        EMAIL, PASSWORD
-    )
 
-    try:
-        global connection_start_time
+    with MailBox(IMAP_SERVER, port=IMAP_PORT, ssl_context=SSL_CONTEXT).login(
+        EMAIL, PASSWORD
+    ) as mailbox:
         connection_start_time = datetime.now()
         logger.info("✅ Connected to mailbox successfully")
-        
+
         while True:
-            try:
-                # Check if we need to refresh the connection (every hour)
-                current_time = datetime.now()
-                if connection_start_time and (current_time - connection_start_time).total_seconds() >= CONNECTION_REFRESH_INTERVAL:
-                    logger.info("🔄 Connection refresh needed (1 hour reached) - reconnecting...")
-                    break  # Break to reconnect
-                
-                await check_emails(mailbox)
-                await asyncio.sleep(CHECK_INTERVAL)
-            except Exception as e:
-                error_msg = str(e).lower()
-                # Check if it's an SSL/TLS connection error
-                if any(keyword in error_msg for keyword in ['ssl', 'tls', 'connection', 'eof', 'closed']):
-                    log_and_broadcast(f"🔌 SSL/TLS connection error detected: {e}", "ERROR")
-                    log_and_broadcast("🔄 Forcing reconnection due to connection issue...")
-                else:
-                    log_and_broadcast(f"❌ Error in check_emails: {e}", "ERROR")
-                    log_and_broadcast("🔄 Reconnecting...")
-                
-                # Add delay before reconnecting to prevent rapid reconnection loop
-                await asyncio.sleep(CHECK_INTERVAL)
-                break  # Break inner loop to reconnect
-    finally:
-        # Manually close the mailbox connection
-        try:
-            mailbox.logout()
-            logger.info("📤 Mailbox connection closed")
-        except Exception as e:
-            log_and_broadcast(f"⚠️ Error closing mailbox connection: {e}", "WARNING")
+            current_time = datetime.now()
+            if (
+                current_time - connection_start_time
+            ).total_seconds() >= CONNECTION_REFRESH_INTERVAL:
+                logger.info(
+                    "🔄 Connection refresh needed (1 hour reached) - reconnecting..."
+                )
+                return
+
+            await check_emails(mailbox)
+            await asyncio.sleep(CHECK_INTERVAL)
 
 
 async def main():
-    log_and_broadcast(f"Testing application configuration...")
+    log_and_broadcast("Testing application configuration...")
 
-    # Run comprehensive tests before starting the main application
     try:
-        # Import and run the test suite
         from tests.run_tests import main as run_tests_main
 
         test_exit_code = run_tests_main()
-
         if test_exit_code != 0:
             print("❌ Pre-startup tests failed! Application will not start.")
-            import sys
-
             sys.exit(1)
-
     except Exception as e:
         print(f"❌ Error running pre-startup tests: {e}")
-        import sys
-
         sys.exit(1)
 
-    log_and_broadcast(f"Testing successful!")
+    log_and_broadcast("Testing successful!")
 
-    # Initialize application configuration and logging
-    logger = setup_application()
+    setup_application()
 
-    # Now we can use log_and_broadcast since logger is defined
     log_and_broadcast(
         f"🔄 Starting Netflix Autovalidator - checking every {CHECK_INTERVAL} seconds"
     )
 
-    # Show connection status
     telegram_status = "enabled" if TELEGRAM_ENABLED else "disabled"
     log_and_broadcast(
         f"📝 Logging to {LOG_PATH} and Telegram notifications {telegram_status} for channel {TELEGRAM_CHANNEL_NAME}"
     )
 
-    # Initialize retry counter
     retry_count = 0
 
     while retry_count < MAX_RETRY_ATTEMPTS:
         try:
             await establish_connection_and_check_emails()
-            # If we reach here, connection was successful, reset retry count
-            
+            retry_count = 0  # Reset on successful connection cycle
 
         except Exception as e:
             retry_count += 1
@@ -425,17 +392,14 @@ async def main():
                     "🛑 Netflix VerifyBot is stopping to prevent infinite loops and spam.",
                     "ERROR",
                 )
-                import sys
-
-                sys.exit(0)  # Exit with code 0 for graceful shutdown
+                sys.exit(0)
             else:
-                # Use exponential backoff: wait longer between retries
-                wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))  # 2, 4, 8 seconds
+                wait_time = CHECK_INTERVAL * (2 ** (retry_count - 1))
                 log_and_broadcast(f"🔄 Retrying in {wait_time} seconds...")
                 await asyncio.sleep(wait_time)
 
     log_and_broadcast(
-        "👋 Netflix VerifyBot has stopped (retry count: {retry_count}).", "INFO"
+        f"👋 Netflix VerifyBot has stopped (retry count: {retry_count}).", "INFO"
     )
 
 
